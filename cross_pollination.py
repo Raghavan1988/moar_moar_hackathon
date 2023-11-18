@@ -19,6 +19,21 @@ path2 = "since_dec22.json"
 
 data_dict = {}
 
+
+import requests
+
+def perform_rag(query):
+    YOUR_API_KEY = "####"
+    headers = {"X-API-Key": YOUR_API_KEY}
+    params = {"query": query}
+    return requests.get(
+        f"https://api.ydc-index.io/rag?query={query}",
+        params=params,
+        headers=headers,
+    ).json()
+
+
+
 def preprocess(path):
     start = time.time()
     data = []
@@ -101,7 +116,7 @@ def collect_results(hits,sents, path, prefix=""):
 
 ##### Start code
 model = SentenceTransformer('sentence-transformers/allenai-specter', device='cpu')
-OPENAI_API_KEY = "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" ##getpass("Please enter your OPEN AI API KEY to continue:")
+OPENAI_API_KEY = "#####key" ##getpass("Please enter your OPEN AI API KEY to continue:")
 ## load the OPENAI LLM model
 open_ai_key = OPENAI_API_KEY
 
@@ -236,5 +251,14 @@ while True:
     except Exception as e:
         print (e)
         continue
+
+
+    response = perform_rag("What are the actionable ideas from " + orthogonal_field + " that can fix the research gap of " + query + " ? The research gaps " + research_gap)
+    print(response)
+
+    w = open("you.com_response.txt", "w")
+    w.write(json.dumps(response))
+    w.close()
+
 
 
