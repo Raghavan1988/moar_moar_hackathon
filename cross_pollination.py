@@ -13,17 +13,13 @@ from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from getpass import getpass
-
-path1 = "arxiv_12_28_2022.json"
-path2 = "since_dec22.json"
-
-data_dict = {}
+import gradio as gr
 
 
 import requests
 
 def perform_rag(query):
-    YOUR_API_KEY = "####"
+    YOUR_API_KEY = ""
     headers = {"X-API-Key": YOUR_API_KEY}
     params = {"query": query}
     return requests.get(
@@ -33,6 +29,10 @@ def perform_rag(query):
     ).json()
 
 
+path1 = "arxiv_12_28_2022.json"
+path2 = "since_dec22.json"
+
+data_dict = {}
 
 def preprocess(path):
     start = time.time()
@@ -114,30 +114,9 @@ def collect_results(hits,sents, path, prefix=""):
 
 
 
-##### Start code
-model = SentenceTransformer('sentence-transformers/allenai-specter', device='cpu')
-OPENAI_API_KEY = "#####key" ##getpass("Please enter your OPEN AI API KEY to continue:")
-## load the OPENAI LLM model
-open_ai_key = OPENAI_API_KEY
-
-sents_from_path1 = preprocess(path1)
-sents_from_path2 = preprocess(path2)
-
-## indices from Annoy
-an = generate_annoy("annoy_index.ann")
-an2 = generate_annoy("annoy_index_since_dec22.ann")
-
-
-llm = OpenAI(openai_api_key=open_ai_key, model_name= "gpt-3.5-turbo-16k")
-
-while True:
-    print ("===============================")
-
-    query = input("Describe the field (or subfield) as a query:")
-    print ("===============================")
-
+def get_research_gaps(query):
     print (query)
-    response1 = collect_results(search(query,an,model,30),sents_from_path1, path1)
+    response1 = ""## collect_results(search(query,an,model,30),sents_from_path1, path1)
     response2 = collect_results(search(query,an2,model,10),sents_from_path2, path2)
 
 
@@ -185,18 +164,16 @@ while True:
     try:
         output = llm_chain.run({'query': query, 'response':response})
         print (output)
-        orthogonal_field = input("Orthogonal Field:")
+        ###orthogonal_field = input("Orthogonal Field:")
     except Exception as e:
         print (e)
-        continue
 
-    llm_response = json.loads(output)
-    
- 
+    #llm_response = json.loads(output)
+    return output
 
-
-
-    response1 = collect_results(search(orthogonal_field,an,model,30),sents_from_path1, path1)
+def get_ideas(orthogonal_field, llm_response, query):
+    # response1 = collect_results(search(orthogonal_field,an,model,30),sents_from_path1, path1)
+    response1=""
     response2 = collect_results(search(orthogonal_field,an2,model,10),sents_from_path2, path2)
     response = response1 + "\n" + response2
     if (len(response) > 60000):
@@ -206,16 +183,30 @@ while True:
     w.write(response1 + "\n" + response2)
     w.close()
 
+    ## replace line breaks with space in json response for llm_response
+    llm_response = llm_response.replace("\n", " ")
+    llm_response = json.dumps(llm_response)
+    output = llm_response
+   # try:
+    #    llm_response = json.loads(llm_response)
+    #except:
+     #   print ("problem with json parsing")
+      #  i = llm_response.index("{")
+       # j = llm_response.rindex("}")
+        #llm_response = llm_response[i:j+1]
+        #print(llm_response)
+        #llm_response = json.loads(llm_response)
 
-    research_gap = llm_response["research_gaps"]
-    opportunies = llm_response["opportunities"]
+    #print(type(llm_response))
+    research_gap = ""
+    opportunities = output
 
     ## cross pollination
 
     template = """ Take a deep breath.  
     You are a researcher in the FIELD1 of {query}. You are tasked with exploring ideas from another FIELD2 of {orthogonal_field} and identify actionable ideas and fix the research gaps. 
-    RESEARCH GAP: You are given the problem of {research_gap} in the FIELD1.
-    OPPORTUNITIES : You are told the potential opportunities are {opportunies}
+    {research_gap}
+    {opportunities}
 
 
     Search Engine returned top articles from FIELD2 {response}.
@@ -240,25 +231,76 @@ while True:
         reason: String
 
     """
-    prompt = PromptTemplate(template=template, input_variables=["query", "orthogonal_field", "research_gap", "opportunies", "response"])
+    prompt = PromptTemplate(template=template, input_variables=["query", "orthogonal_field", "research_gap", "opportunities", "response"])
     llm_chain = LLMChain(prompt=prompt, llm=llm)
 
     output = ""
 
     try:
-        output = llm_chain.run({'query': query, 'orthogonal_field':orthogonal_field, 'research_gap':research_gap, 'opportunies':opportunies, 'response':response})
+        output = llm_chain.run({'query': query, 'orthogonal_field':orthogonal_field, 'research_gap':research_gap, 'opportunities':opportunities, 'response':response})
         print (output)
     except Exception as e:
         print (e)
-        continue
+
+    response = perform_rag("What are some actionable 5 ideas from " + orthogonal_field + " that can fix the research gap of " + query + " ? The research gaps  are " + research_gap)
+    return response["answer"] + " <br>" ##+ parse_json_to_string(output)
+
+    
+with gr.Blocks() as demo:
+    gr.Markdown("<h1><center>Research Gap and Idea Brainstorm</center></h1>")
+    gr.Markdown("<h2>Generate Research Gaps</h2>")
+    field = gr.Textbox(label="Field")
+    field_submit_btn = gr.Button("Submit")
+    research_gap = gr.Textbox(label="Research Gap")
+    field_submit_btn.click(get_research_gaps,[field], [research_gap])
+
+    gr.Markdown("<h2>Generate Ideas</h2>")
+    orthogonal_field = gr.Textbox(label="Orthogonal Field")
+    idea_submit_btn = gr.Button("Submit")
+    ## = gr.Textbox(label="Ideas")
+    ideas = gr.Markdown(label="Ideas")
+    idea_submit_btn.click(get_ideas,[orthogonal_field, research_gap, field], [ideas])
+
+import json
+
+def parse_json_to_string(obj, indent_level=1):
+    """
+    Recursive function to parse JSON object and convert it to a formatted string.
+    """
+    indent = '  ' * indent_level
+    if isinstance(obj, dict):
+        string_parts = ['{\n']
+        for key, value in obj.items():
+            string_parts.append(f"{indent}  \"{key}\": {parse_json_to_string(value, indent_level + 1)},\n")
+        string_parts.append(indent + '}')
+        return ''.join(string_parts).rstrip(',\n') + '\n'
+    elif isinstance(obj, list):
+        string_parts = ['[\n']
+        for item in obj:
+            string_parts.append(f"{indent}  {parse_json_to_string(item, indent_level + 1)},\n")
+        string_parts.append(indent + ']')
+        return ''.join(string_parts).rstrip(',\n') + '\n'
+    else:
+        return json.dumps(obj)
 
 
-    response = perform_rag("What are the actionable ideas from " + orthogonal_field + " that can fix the research gap of " + query + " ? The research gaps " + research_gap)
-    print(response)
 
-    w = open("you.com_response.txt", "w")
-    w.write(json.dumps(response))
-    w.close()
+if __name__ == "__main__":
+    ##### Start code
+    model = SentenceTransformer('sentence-transformers/allenai-specter', device='cpu')
+    OPENAI_API_KEY = "" ##getpass("Please enter your OPEN AI API KEY to continue:")
+    ## load the OPENAI LLM model
+    open_ai_key = OPENAI_API_KEY
+
+    sents_from_path1 = preprocess(path2)
+    sents_from_path2 = preprocess(path2)
+
+    ## indices from Annoy
+    an = None ## generate_annoy("annoy_index.ann")
+    an2 = generate_annoy("annoy_index_since_dec22.ann")
+
+    llm = OpenAI(openai_api_key=open_ai_key, model_name= "gpt-3.5-turbo-16k")
+    demo.launch()
 
 
 
